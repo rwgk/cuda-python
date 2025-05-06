@@ -5,6 +5,8 @@
 
 import sys
 
+IS_WINDOWS = sys.platform == "win32"
+
 SUPPORTED_LIBNAMES = (
     # Core CUDA Runtime and Compiler
     "nvJitLink",
@@ -65,7 +67,7 @@ PARTIALLY_SUPPORTED_LIBNAMES_ALL = (
     + PARTIALLY_SUPPORTED_LIBNAMES_WINDOWS_ONLY
 )
 
-if sys.platform == "win32":
+if IS_WINDOWS:
     PARTIALLY_SUPPORTED_LIBNAMES = PARTIALLY_SUPPORTED_LIBNAMES_WINDOWS
 else:
     PARTIALLY_SUPPORTED_LIBNAMES = PARTIALLY_SUPPORTED_LIBNAMES_LINUX
@@ -109,6 +111,7 @@ DIRECT_DEPENDENCIES = {
 #   cuda_12.5.1_555.42.06_linux.run
 #   cuda_12.6.2_560.35.03_linux.run
 #   cuda_12.8.0_570.86.10_linux.run
+#   cuda_12.9.0_575.51.03_linux.run
 # Generated with toolshed/build_path_finder_sonames.py
 SUPPORTED_LINUX_SONAMES = {
     "cublas": (
@@ -230,6 +233,7 @@ SUPPORTED_LINUX_SONAMES = {
 #   cuda_12.5.1_555.85_windows.exe
 #   cuda_12.6.2_560.94_windows.exe
 #   cuda_12.8.1_572.61_windows.exe
+#   cuda_12.9.0_576.02_windows.txt
 # Generated with toolshed/build_path_finder_dlls.py (WITH MANUAL EDITS)
 SUPPORTED_WINDOWS_DLLS = {
     "cublas": (
@@ -337,6 +341,7 @@ SUPPORTED_WINDOWS_DLLS = {
         "nvvm64.dll",
         "nvvm64_33_0.dll",
         "nvvm64_40_0.dll",
+        "nvvm70.dll",
     ),
 }
 

@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: LicenseRef-NVIDIA-SOFTWARE-LICENSE
 
 import functools
-import sys
 
 from cuda.bindings._path_finder.find_nvidia_dynamic_library import _find_nvidia_dynamic_library
 from cuda.bindings._path_finder.load_dl_common import LoadedDL, load_dependencies
+from cuda.bindings._path_finder.supported_libs import IS_WINDOWS
 
-if sys.platform == "win32":
+if IS_WINDOWS:
     from cuda.bindings._path_finder.load_dl_windows import (
         check_if_already_loaded_from_elsewhere,
         load_with_abs_path,
@@ -38,6 +38,7 @@ def _load_nvidia_dynamic_library_no_cache(libname: str) -> LoadedDL:
         loaded = load_with_system_search(libname, found.lib_searched_for)
         if loaded is not None:
             return loaded
+        found.retry_with_cuda_home_priority_last()
         found.raise_if_abs_path_is_None()
 
     # Load the library from the found path

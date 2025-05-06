@@ -24,51 +24,26 @@ strategy for locating NVIDIA shared libraries:
      The absolute path of the already loaded library will be returned, along
      with the handle to the library.
 
-1. **Python Package Ecosystem**
-   - Scans `sys.path` to find libraries installed via NVIDIA Python wheels.
+1. **NVIDIA Python wheels**
+   - Scans all site-packages to find libraries installed via NVIDIA Python wheels.
 
-2. **Conda Environments**
-   - Leverages Conda-specific paths through our fork of `get_cuda_paths()`
-     from numba-cuda.
-
-3. **Environment variables**
-   - Relies on `CUDA_HOME`/`CUDA_PATH` environment variables if set.
-
-4. **System Installations**
-   - Checks traditional system locations through these paths:
-     - Linux: `/usr/local/cuda/lib64`
-     - Windows: `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\vX.Y\bin`
-       (where X.Y is the CTK version)
-   - **Notably does NOT search**:
-     - Versioned CUDA directories like `/usr/local/cuda-12.3`
-     - Distribution-specific packages (RPM/DEB)
-       EXCEPT Debian's `nvidia-cuda-toolkit`
-
-5. **OS Default Mechanisms**
+2. **OS default mechanisms / Conda environments**
    - Falls back to native loader:
      - `dlopen()` on Linux
      - `LoadLibraryW()` on Windows
+   - CTK installations with system config updates are expected to be discovered:
+     - Linux: Via `/etc/ld.so.conf.d/*cuda*.conf`
+     - Windows: Via `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\vX.Y\bin` on system `PATH`
+   - Conda installations are expected to be discovered:
+     - Linux: Via `$ORIGIN/../lib` on `RPATH` (of the `python` binary)
+     - Windows: Via `%CONDA_PREFIX%\Library\bin` on system `PATH`
+
+3. **Environment variables**
+   - Relies on `CUDA_HOME` or `CUDA_PATH` environment variables if set
+     (in that order).
 
 Note that the search is done on a per-library basis. There is no centralized
 mechanism that ensures all libraries are found in the same way.
-
-## Implementation Philosophy
-
-The current implementation balances stability and evolution:
-
-- **Baseline Foundation:** Uses a fork of numba-cuda's `cuda_paths.py` that has been
-  battle-tested in production environments.
-
-- **Validation Infrastructure:** Comprehensive CI testing matrix being developed to cover:
-  - Various Linux/Windows environments
-  - Python packaging formats (wheels, conda)
-  - CUDA Toolkit versions
-
-- **Roadmap:** Planned refactoring to:
-  - Unify library discovery logic
-  - Improve maintainability
-  - Better enforce search priority
-  - Expand platform support
 
 ## Maintenance Requirements
 

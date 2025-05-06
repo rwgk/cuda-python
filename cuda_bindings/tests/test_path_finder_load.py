@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: LicenseRef-NVIDIA-SOFTWARE-LICENSE
 
 import os
-import subprocess  # nosec B404
 import sys
 
 import pytest
+from run_python_code_safely import run_python_code_safely
 
 from cuda.bindings import path_finder
 from cuda.bindings._path_finder import supported_libs
@@ -38,7 +38,7 @@ def test_all_libnames_expected_lib_symbols_consistency():
     assert tuple(sorted(ALL_LIBNAMES)) == tuple(sorted(supported_libs.EXPECTED_LIB_SYMBOLS.keys()))
 
 
-def _build_subprocess_failed_for_libname_message(libname, result):
+def build_subprocess_failed_for_libname_message(libname, result):
     return (
         f"Subprocess failed for {libname=!r} with exit code {result.returncode}\n"
         f"--- stdout-from-subprocess ---\n{result.stdout}<end-of-stdout-from-subprocess>\n"
@@ -46,9 +46,8 @@ def _build_subprocess_failed_for_libname_message(libname, result):
     )
 
 
-@pytest.mark.parametrize("api", ("find", "load"))
 @pytest.mark.parametrize("libname", TEST_FIND_OR_LOAD_LIBNAMES)
-def test_find_or_load_nvidia_dynamic_library(info_summary_append, api, libname):
+def test_find_or_load_nvidia_dynamic_library(info_summary_append, libname):
     # We intentionally run each dynamic library operation in a subprocess
     # to ensure isolation of global dynamic linking state (e.g., dlopen handles).
     # Without subprocesses, loading/unloading libraries during testing could
@@ -56,14 +55,8 @@ def test_find_or_load_nvidia_dynamic_library(info_summary_append, api, libname):
     #
     # Defining the subprocess code snippets as strings ensures each subprocess
     # runs a minimal, independent script tailored to the specific libname and API being tested.
-    if api == "find":
-        code = f"""\
-from cuda.bindings._path_finder.find_nvidia_dynamic_library import find_nvidia_dynamic_library
-abs_path = find_nvidia_dynamic_library({libname!r})
-print(f"{{abs_path!r}}")
-"""
-    else:
-        code = f"""\
+    code = f"""\
+import os
 from cuda.bindings.path_finder import _load_nvidia_dynamic_library
 from cuda.bindings._path_finder.load_nvidia_dynamic_library import _load_nvidia_dynamic_library_no_cache
 
@@ -78,19 +71,13 @@ if loaded_dl_from_cache is not loaded_dl_fresh:
 loaded_dl_no_cache = _load_nvidia_dynamic_library_no_cache({libname!r})
 if not loaded_dl_no_cache.was_already_loaded_from_elsewhere:
     raise RuntimeError("loaded_dl_no_cache.was_already_loaded_from_elsewhere")
-if loaded_dl_no_cache.abs_path != loaded_dl_fresh.abs_path:
-    raise RuntimeError(f"{{loaded_dl_no_cache.abs_path=!r}} != {{loaded_dl_fresh.abs_path=!r}}")
+if not os.path.samefile(loaded_dl_no_cache.abs_path, loaded_dl_fresh.abs_path):
+    raise RuntimeError(f"not os.path.samefile({{loaded_dl_no_cache.abs_path=!r}}, {{loaded_dl_fresh.abs_path=!r}})")
 
 print(f"{{loaded_dl_fresh.abs_path!r}}")
 """
-    result = subprocess.run(  # nosec B603
-        [sys.executable, "-c", code],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        encoding="utf-8",
-        timeout=30,  # Ensure CI testing does not hang for an excessive amount of time.
-    )
+    result = run_python_code_safely(code, timeout=30)
     if result.returncode == 0:
         info_summary_append(f"abs_path={result.stdout.rstrip()}")
     else:
-        raise RuntimeError(_build_subprocess_failed_for_libname_message(libname, result))
+        raise RuntimeError(build_subprocess_failed_for_libname_message(libname, result))
