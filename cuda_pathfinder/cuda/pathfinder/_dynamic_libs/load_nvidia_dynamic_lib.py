@@ -116,4 +116,7 @@ def load_nvidia_dynamic_lib(libname: str) -> LoadedDL:
             f" Currently running: {pointer_size_bits}-bit Python"
             f" {sys.version_info.major}.{sys.version_info.minor}"
         )
+    loaded = _load_lib_no_cache(libname)
+    dl_manager.register_pinned(libname, loaded)
+    return loaded
     return dl_manager.pin_nvidia_dynamic_lib(libname)
