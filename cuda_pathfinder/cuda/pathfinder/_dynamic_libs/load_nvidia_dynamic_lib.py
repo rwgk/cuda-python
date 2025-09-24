@@ -7,6 +7,7 @@ import sys
 
 from cuda.pathfinder._dynamic_libs.find_nvidia_dynamic_lib import _FindNvidiaDynamicLib
 from cuda.pathfinder._dynamic_libs.load_dl_common import LoadedDL, load_dependencies
+from cuda.pathfinder._dynamic_libs import dl_manager
 from cuda.pathfinder._utils.platform_aware import IS_WINDOWS
 
 if IS_WINDOWS:
@@ -115,4 +116,4 @@ def load_nvidia_dynamic_lib(libname: str) -> LoadedDL:
             f" Currently running: {pointer_size_bits}-bit Python"
             f" {sys.version_info.major}.{sys.version_info.minor}"
         )
-    return _load_lib_no_cache(libname)
+    return dl_manager.pin_nvidia_dynamic_lib(libname)
