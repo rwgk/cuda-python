@@ -38,6 +38,8 @@ SPECIAL_CASE_LICENSE_IDENTIFIERS = {
     # key: repo-relative path or glob, value: expected SPDX license identifier
     ".coveragerc": "LicenseRef-NVIDIA-SOFTWARE-LICENSE",
     "cuda_python_test_helpers/cuda_python_test_helpers/nvvm_bitcode.py": "LicenseRef-NVIDIA-SOFTWARE-LICENSE",
+    "cuda_bindings/benchmarks/*": "Apache-2.0",
+    "cuda_bindings/benchmarks/pytest-legacy/*": "LicenseRef-NVIDIA-SOFTWARE-LICENSE",
     "toolshed/build_static_bitcode_input.py": "LicenseRef-NVIDIA-SOFTWARE-LICENSE",
     "toolshed/dump_cutile_b64.py": "LicenseRef-NVIDIA-SOFTWARE-LICENSE",
 }
