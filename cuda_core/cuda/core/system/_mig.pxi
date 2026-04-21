@@ -29,7 +29,7 @@ cdef class MigInfo:
     @property
     def mode(self) -> bool:
         """
-        Get current MIG mode for the device.
+        Get current MIG mode for the parent device.
 
         For Ampere™ or newer fully supported devices.
 
@@ -47,7 +47,7 @@ cdef class MigInfo:
     @mode.setter
     def mode(self, mode: bool):
         """
-        Set the MIG mode for the device.
+        Set the MIG mode for the parent device.
 
         For Ampere™ or newer fully supported devices.
 
@@ -67,14 +67,12 @@ cdef class MigInfo:
     @property
     def pending_mode(self) -> bool:
         """
-        Get pending MIG mode for the device.
+        Get pending MIG mode for the parent device.
 
         For Ampere™ or newer fully supported devices.
 
         Changing MIG modes may require device unbind or reset. The "pending" MIG
         mode refers to the target mode following the next activation trigger.
-
-        If the device is not a MIG device, returns `False`.
 
         Returns
         -------
@@ -87,7 +85,8 @@ cdef class MigInfo:
     @property
     def device_count(self) -> int:
         """
-        Get the maximum number of MIG devices that can exist under this device.
+        Get the maximum number of MIG devices that can exist under this parent
+        device.
 
         Returns zero if MIG is not supported or enabled.
 
@@ -112,7 +111,7 @@ cdef class MigInfo:
         Device
             The parent GPU device for this MIG device.
         """
-        parent_handle = nvml.device_get_handle_from_mig_device_handle(self._device._handle)
+        parent_handle = nvml.device_get_device_handle_from_mig_device_handle(self._device._handle)
         parent_device = Device.__new__(Device)
         parent_device._handle = parent_handle
         return parent_device
@@ -147,7 +146,7 @@ cdef class MigInfo:
 
     def get_all_devices(self) -> Iterable[Device]:
         """
-        Get all MIG devices under its parent device.
+        Get all MIG devices under this parent device.
 
         If the compute instance is destroyed either explicitly or by destroying,
         resetting or unbinding the parent GPU instance or the GPU device itself

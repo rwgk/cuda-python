@@ -734,20 +734,26 @@ def test_pstates():
 @pytest.mark.skipif(helpers.IS_WSL or helpers.IS_WINDOWS, reason="MIG not supported on WSL or Windows")
 def test_mig():
     for device in system.Device.get_all_devices():
+        mig = device.mig
+        assert isinstance(mig.is_mig_device, bool)
+
         with unsupported_before(device, None):
-            mig = device.mig
+            assert isinstance(mig.mode, bool)
+            assert isinstance(mig.pending_mode, bool)
 
-            assert isinstance(mig.is_mig_device, bool)
-            if mig.is_mig_device:
-                assert isinstance(mig.mode, bool)
-                assert isinstance(mig.pending_mode, bool)
+            device_count = mig.device_count
+            assert isinstance(device_count, int)
+            assert device_count >= 0
 
-                device_count = mig.get_device_count()
-                assert isinstance(device_count, int)
-                assert device_count >= 0
+            mig_devices = list(mig.get_all_devices())
 
-                for mig_device in mig.get_all_devices():
-                    assert isinstance(mig_device, system.Device)
+        assert all(isinstance(mig_device, system.Device) for mig_device in mig_devices)
+
+        for mig_device in mig_devices:
+            mig_child = mig_device.mig
+            assert mig_child.is_mig_device
+            assert isinstance(mig_child.parent, system.Device)
+            assert mig_child.parent.uuid == device.uuid
 
 
 def test_uuid():
