@@ -113,17 +113,31 @@ def _ensure_msvc_tool(tool_name: str) -> str:
     print(f"{tool_name} not found on PATH, activating MSVC from {vcvarsall}", file=sys.stderr)
 
     cmd_exe = os.environ.get("ComSpec", "cmd.exe")
+    bootstrap_script = None
     try:
-        output = subprocess.check_output(
-            [cmd_exe, "/d", "/s", "/c", f'"{vcvarsall}" x64 >nul && set'],
-            text=True,
-        )
+        with tempfile.NamedTemporaryFile("w", suffix=".cmd", delete=False, encoding="utf-8", newline="\r\n") as f:
+            f.write("@echo off\n")
+            f.write(f'call "{vcvarsall}" x64 >nul\n')
+            f.write("if errorlevel 1 exit /b %errorlevel%\n")
+            f.write("set\n")
+            bootstrap_script = f.name
+
+        output = subprocess.check_output([cmd_exe, "/d", "/c", bootstrap_script], text=True, stderr=subprocess.STDOUT)
     except (OSError, subprocess.CalledProcessError) as exc:
+        details = ""
+        if isinstance(exc, subprocess.CalledProcessError) and exc.output:
+            details = f" Output:\n{exc.output}"
         raise RuntimeError(
             f"Failed to activate the MSVC build environment using {vcvarsall!r}. "
             "Install Visual Studio Build Tools with the Desktop development with C++ "
-            "workload, or launch the build from a Visual Studio developer prompt."
+            f"workload, or launch the build from a Visual Studio developer prompt.{details}"
         ) from exc
+    finally:
+        if bootstrap_script is not None:
+            try:
+                os.unlink(bootstrap_script)
+            except OSError:
+                pass
 
     for line in output.splitlines():
         if "=" not in line or line.startswith("="):
