@@ -11,6 +11,7 @@ import functools
 import glob
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,118 @@ build_sdist = _build_meta.build_sdist
 get_requires_for_build_sdist = _build_meta.get_requires_for_build_sdist
 
 COMPILE_FOR_COVERAGE = bool(int(os.environ.get("CUDA_PYTHON_COVERAGE", "0")))
+
+
+def _find_vswhere() -> str | None:
+    """Locate vswhere.exe if Visual Studio installed it."""
+    for exe_name in ("vswhere.exe", "vswhere"):
+        path = shutil.which(exe_name)
+        if path:
+            return path
+
+    for env_name in ("ProgramFiles(x86)", "ProgramFiles"):
+        root = os.environ.get(env_name)
+        if not root:
+            continue
+        candidate = os.path.join(root, "Microsoft Visual Studio", "Installer", "vswhere.exe")
+        if os.path.isfile(candidate):
+            return candidate
+
+    return None
+
+
+@functools.cache
+def _find_vcvarsall_bat() -> str:
+    """Locate vcvarsall.bat for bootstrapping the MSVC build environment."""
+    env_candidates = (
+        ("VCINSTALLDIR", os.path.join("Auxiliary", "Build", "vcvarsall.bat")),
+        ("VSINSTALLDIR", os.path.join("VC", "Auxiliary", "Build", "vcvarsall.bat")),
+    )
+    for env_name, suffix in env_candidates:
+        root = os.environ.get(env_name)
+        if not root:
+            continue
+        candidate = os.path.join(root, suffix)
+        if os.path.isfile(candidate):
+            return candidate
+
+    vswhere = _find_vswhere()
+    if vswhere is not None:
+        try:
+            output = subprocess.check_output(
+                [
+                    vswhere,
+                    "-latest",
+                    "-products",
+                    "*",
+                    "-requires",
+                    "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                    "-find",
+                    r"VC\Auxiliary\Build\vcvarsall.bat",
+                ],
+                text=True,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            output = ""
+        for line in output.splitlines():
+            candidate = line.strip()
+            if candidate and os.path.isfile(candidate):
+                return candidate
+
+    for env_name in ("ProgramFiles(x86)", "ProgramFiles"):
+        root = os.environ.get(env_name)
+        if not root:
+            continue
+        pattern = os.path.join(root, "Microsoft Visual Studio", "*", "*", "VC", "Auxiliary", "Build", "vcvarsall.bat")
+        matches = sorted(glob.glob(pattern), reverse=True)
+        if matches:
+            return matches[0]
+
+    raise RuntimeError(
+        "Unable to locate vcvarsall.bat. Install Visual Studio Build Tools with the "
+        "Desktop development with C++ workload, or launch the build from a Visual "
+        "Studio developer prompt."
+    )
+
+
+@functools.cache
+def _ensure_msvc_tool(tool_name: str) -> str:
+    """Ensure an MSVC tool is available even outside a developer prompt."""
+    tool_path = shutil.which(tool_name)
+    if tool_path:
+        return tool_path
+
+    vcvarsall = _find_vcvarsall_bat()
+    print(f"{tool_name} not found on PATH, activating MSVC from {vcvarsall}", file=sys.stderr)
+
+    cmd_exe = os.environ.get("ComSpec", "cmd.exe")
+    try:
+        output = subprocess.check_output(
+            [cmd_exe, "/d", "/s", "/c", f'"{vcvarsall}" x64 >nul && set'],
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError(
+            f"Failed to activate the MSVC build environment using {vcvarsall!r}. "
+            "Install Visual Studio Build Tools with the Desktop development with C++ "
+            "workload, or launch the build from a Visual Studio developer prompt."
+        ) from exc
+
+    for line in output.splitlines():
+        if "=" not in line or line.startswith("="):
+            continue
+        key, value = line.split("=", 1)
+        os.environ[key] = value
+
+    tool_path = shutil.which(tool_name)
+    if tool_path:
+        print(f"Using MSVC tool {tool_name} at {tool_path}", file=sys.stderr)
+        return tool_path
+
+    raise RuntimeError(
+        f"MSVC environment was activated via {vcvarsall!r}, but {tool_name!r} is still "
+        "not available on PATH."
+    )
 
 
 # Please keep in sync with the copy in cuda_bindings/build_hooks.py.
@@ -188,16 +301,19 @@ def _build_cuda_core(debug=False):
     # On Windows, _tensor_bridge.pyx needs a stub import library so the MSVC
     # linker can resolve the AOTI symbols (they live in torch_cpu.dll at
     # runtime).  We generate the .lib from a .def file at build time.
+    # setuptools can discover MSVC for extension builds, but this explicit
+    # lib.exe invocation also needs the developer environment.
     # Note: aoti_torch_get_current_cuda_stream lives in torch_cuda.dll and
     # is resolved lazily at runtime (not via the stub lib) — see
     # _tensor_bridge.pyx.
     _aoti_extra_link_args = []
     if sys.platform == "win32":
+        _lib_exe = _ensure_msvc_tool("lib")
         _def_file = os.path.join("cuda", "core", "_include", "aoti_shim.def")
         _lib_file = os.path.join("build", "aoti_shim.lib")
         os.makedirs("build", exist_ok=True)
         subprocess.check_call(  # noqa: S603
-            ["lib", f"/DEF:{_def_file}", f"/OUT:{_lib_file}", "/MACHINE:X64"],  # noqa: S607
+            [_lib_exe, f"/DEF:{_def_file}", f"/OUT:{_lib_file}", "/MACHINE:X64"],  # noqa: S607
             stdout=subprocess.DEVNULL,
         )
         _aoti_extra_link_args = [_lib_file]
