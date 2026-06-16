@@ -76,7 +76,7 @@ class SphinxAdapter(ClassicAdapter):
         return msg
 
 
-def versionadded(reason="", version="", line_length=70):
+def versionadded(version, reason="", line_length=70):
     """
     Decorator that inserts a "versionadded" Sphinx directive into the docstring.
     """
@@ -88,7 +88,7 @@ def versionadded(reason="", version="", line_length=70):
     )
 
 
-def versionchanged(reason="", version="", line_length=70):
+def versionchanged(version, reason="", line_length=70):
     """
     Decorator that inserts a "versionchanged" Sphinx directive into the docstring.
     """
