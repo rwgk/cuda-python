@@ -2,7 +2,6 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-import contextlib
 import re
 import shutil
 import subprocess
@@ -11,12 +10,14 @@ import warnings
 
 import pytest
 
+from cuda.bindings._internal.utils import FunctionNotFoundError
 from cuda.core import _linker
 from cuda.core._device import Device
 from cuda.core._module import Kernel, ObjectCode
 from cuda.core._program import Program, ProgramOptions
-from cuda.core._utils.cuda_utils import CUDAError, handle_return
+from cuda.core._utils.cuda_utils import CUDAError, handle_return, nvrtc
 from cuda.core.typing import CompilerBackendType, PCHStatusType
+from cuda.pathfinder import DynamicLibNotFoundError
 
 pytest_plugins = ("cuda_python_test_helpers.nvvm_bitcode",)
 
@@ -38,9 +39,6 @@ nvvm_available = pytest.mark.skipif(
     not _is_nvvm_available(), reason="NVVM not available (libNVVM not found or cuda-bindings < 12.9.0)"
 )
 
-with contextlib.suppress(Exception):
-    from cuda.core._utils.cuda_utils import nvrtc
-
 
 def _get_nvrtc_version_for_tests():
     """
@@ -52,10 +50,11 @@ def _get_nvrtc_version_for_tests():
     """
     try:
         nvrtc_major, nvrtc_minor = handle_return(nvrtc.nvrtcVersion())
-        version = nvrtc_major * 1000 + nvrtc_minor * 100
-        return version
-    except Exception:
+        return nvrtc_major * 1000 + nvrtc_minor * 100
+    except (DynamicLibNotFoundError, FunctionNotFoundError):
+        # libnvrtc not loadable, or nvrtcVersion symbol missing.
         return None
+    # CUDAError from a successfully loaded library propagates (real bug).
 
 
 def _has_nvrtc_pch_apis_for_tests():
@@ -1121,8 +1120,9 @@ def test_cuda_gdb_shows_nvrtc_debug_source_lines(init_cuda):
         timeout=120,
     )
     output = (proc.stdout or "") + (proc.stderr or "")
-    if "Operation not permitted" in output or "ptrace" in output.lower():
-        pytest.skip("cuda-gdb cannot trace this process")
+    lowered = output.lower()
+    if "operation not permitted" in lowered or "ptrace" in lowered or "debugging is not possible" in lowered:
+        pytest.xfail("cuda-gdb is not usable for debugging on this machine: " + output)
     assert re.search(r"cuda_gdb_src_kernel_\w+\.cu", output), output
     assert "ISSUE_2422_SOURCE_LINE" in output, output
     assert "No such file or directory" not in output, output
