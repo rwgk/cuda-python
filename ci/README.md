@@ -22,3 +22,27 @@ The canonical `NVIDIA/cuda-python` repository does not need this variable
 because its standard workflow behavior is enabled directly. Before enabling a
 customization elsewhere, document the repository-specific prerequisites and
 verification procedure in that repository's own documentation.
+
+## CUDA Bindings Line Registry
+
+`ci/versions.yml` is the authoritative public registry for CUDA bindings
+release lines. Each line declares its source directory and exact toolkit
+build/test pin. The scalar `current` and `maintenance` roles select the two
+public lines. A source directory's `[tool.setuptools_scm].tag_regex` defines
+its accepted tag syntax and release family. Update that SCM metadata together
+with the toolkit pin when a source root moves to a new toolkit minor; registry
+validation rejects a configuration where the two disagree.
+
+The Python helpers are modules in the `ci.tools` package. Use
+`ci.tools.bindings_config` instead of reading the YAML directly. It validates
+the registry and emits normalized JSON with the configured values plus the
+source SCM tag regex and derived CTK target and CUDA ABI major/variant:
+
+```console
+python -m ci.tools.bindings_config
+python -m ci.tools.bindings_config --lines
+python -m ci.tools.bindings_config --role current
+```
+
+The public wheel builder requires one `current` line and one `maintenance`
+line with different CUDA ABI majors.
