@@ -72,6 +72,11 @@ nvrtc_pch_available = pytest.mark.skipif(
     reason="PCH runtime APIs require NVRTC >= 12.8 bindings",
 )
 
+bundled_headers_available = pytest.mark.skipif(
+    (_get_nvrtc_version_for_tests() or 0) < 13300,
+    reason="use_bundled_headers requires NVRTC >= 13.3",
+)
+
 
 def _has_check_nvvm_compiler_options():
     try:
@@ -300,6 +305,48 @@ def test_cpp_program_pch_auto_creates(init_cuda, tmp_path):
     assert program.pch_status in ("created", "not_attempted", "failed")
     assert isinstance(program.pch_status, PCHStatusType)
     program.close()
+
+
+@bundled_headers_available
+@pytest.mark.agent_authored(model="claude-sonnet-5")
+def test_use_bundled_headers_installs_and_compiles(init_cuda, tmp_path, monkeypatch):
+    """``use_bundled_headers`` should install NVRTC's bundled CUDA/CCCL headers into the
+    (monkeypatched) cache directory and make them available on the include path, without
+    a CUDA Toolkit or any user-supplied ``include_path``."""
+    import cuda.core._program as _program_module
+
+    cache_root = tmp_path / "cache-root"
+    monkeypatch.setattr(_program_module, "_default_cache_dir", lambda: cache_root)
+
+    code = """
+#include <cuda/std/type_traits>
+extern "C" __global__ void my_kernel(int *out) {
+    *out = cuda::std::is_integral<int>::value;
+}
+"""
+    headers_dir = cache_root / "nvrtc-bundled-headers"
+    assert not headers_dir.exists()
+
+    # Sanity check: without use_bundled_headers, the CCCL header isn't found (proves the
+    # option -- not some ambient CUDA Toolkit install -- is what makes the compile below work).
+    program = Program(code, "c++")
+    try:
+        with pytest.raises(CUDAError, match="could not open source file"):
+            program.compile("ptx")
+    finally:
+        program.close()
+
+    program = Program(code, "c++", ProgramOptions(use_bundled_headers=True))
+    try:
+        object_code = program.compile("ptx")
+    finally:
+        program.close()
+    assert isinstance(object_code, ObjectCode)
+
+    assert headers_dir.is_dir()
+    assert (headers_dir / ".nvrtc_headers_version").is_file()
+    assert (headers_dir / "cccl").is_dir()
+    assert (headers_dir / "cccl" / "cuda" / "std" / "type_traits").is_file()
 
 
 def test_cpp_program_pch_status_none_without_pch(init_cuda):
@@ -1088,6 +1135,62 @@ def test_nvrtc_debug_concurrent_compile_uses_unique_temp_files(init_cuda):
             prog.close()
     for name in names:
         assert not os.path.isfile(name)
+
+
+@pytest.mark.agent_authored(model="claude-opus-5")
+def test_nvrtc_debug_preserves_quoted_include_resolution(init_cuda, tmp_path, monkeypatch):
+    """A quoted #include keeps resolving once debug redirects the NVRTC name (issue #2422).
+
+    NVRTC looks for #include "..." in the directory of the name it was handed, so
+    pointing that name at a temp .cu moves the search away from where the header
+    lives and turning debug on alone breaks a compile that worked without it.
+    """
+    import os
+
+    (tmp_path / "local.h").write_text("#define BUMP 7\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    code = '#include "local.h"\nextern "C" __global__ void matmul(int* out) { *out = BUMP; }\n'
+
+    for debug in (False, True):
+        prog = Program(code, "c++", ProgramOptions(arch="sm_80", debug=debug))
+        try:
+            name = prog.compile("ptx").name
+        finally:
+            prog.close()
+        if debug:
+            # Only a regression test while the name really does move out of the
+            # directory holding local.h; otherwise it would pass for free.
+            assert os.path.dirname(os.path.realpath(name)) != os.path.realpath(tmp_path)
+
+
+@pytest.mark.agent_authored(model="claude-opus-5")
+@pytest.mark.parametrize("debug", [False, True])
+def test_nvrtc_debug_keeps_file_the_caller_named(init_cuda, tmp_path, debug):
+    """Program only unlinks a temp file it wrote itself (issue #2422).
+
+    The name handed to NVRTC doubled as the cleanup target, so a name pointing at
+    a file that already existed made teardown delete the caller's own source.
+    """
+    import gc
+
+    source = tmp_path / "matmul.cu"
+    contents = "// the caller's own file\n"
+    source.write_text(contents, encoding="utf-8")
+    code = 'extern "C" __global__ void matmul() {}'
+    options = ProgramOptions(arch="sm_80", name=str(source), debug=debug)
+
+    prog = Program(code, "c++", options)
+    prog.compile("ptx")
+    prog.close()
+    assert source.is_file(), "close() deleted a file the caller owns"
+
+    # __dealloc__ runs the same cleanup, so collection must spare it too.
+    prog = Program(code, "c++", options)
+    prog.compile("ptx")
+    del prog
+    gc.collect()
+    assert source.is_file(), "collection deleted a file the caller owns"
+    assert source.read_text(encoding="utf-8") == contents
 
 
 @pytest.mark.agent_authored(model="cursor-grok-4.6")
