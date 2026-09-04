@@ -65,7 +65,6 @@ def test_cuda_device_order():
     for kind in ("Orin", "Thor"):
         if any(kind in device["name"] for device in nvml_devices):
             pytest.skip(f"Skipping test on {kind}, which has non-standard device naming")
-        return
 
     def compare(cuda_device, nvml_device):
         return cuda_device["name"] == nvml_device["name"] and (
