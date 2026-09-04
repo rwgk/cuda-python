@@ -25,6 +25,12 @@ RELEASE_STATUSES = frozenset({"current", "maintenance"})
 _NAME_PATTERN = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*")
 _PACKAGE_ROOT_PATTERN = re.compile(r"[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*")
 _TOOLKIT_VERSION_PATTERN = re.compile(r"[1-9][0-9]*\.[0-9]+\.[0-9]+")
+_RELEASE_VERSION_PATTERN = re.compile(
+    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"(?:(?:a|b|rc)(?:0|[1-9][0-9]*))?"
+    r"(?:\.post(?:0|[1-9][0-9]*))?"
+    r"(?:\.dev(?:0|[1-9][0-9]*))?"
+)
 
 
 class BindingsConfigError(ValueError):
@@ -37,6 +43,22 @@ def parse_pep440_version(value: str, label: str = "version") -> Version:
         return Version(value)
     except InvalidVersion as error:
         raise BindingsConfigError(f"{label} is not a valid PEP 440 version: {value!r}") from error
+
+
+def parse_prefixed_version(tag: str, prefix: str) -> Version | None:
+    """Parse the PEP 440 version following an exact component tag prefix."""
+    if not tag.startswith(prefix):
+        return None
+    value = tag.removeprefix(prefix)
+    # Keep one canonical spelling for every accepted release version while
+    # delegating PEP 440 interpretation and comparison to packaging.
+    if _RELEASE_VERSION_PATTERN.fullmatch(value) is None:
+        return None
+    try:
+        version = parse_pep440_version(value, "release tag version")
+    except BindingsConfigError:
+        return None
+    return None if version.local is not None else version
 
 
 def _compile_tag_regex(pattern: str, label: str) -> re.Pattern[str]:
@@ -53,7 +75,7 @@ def _compile_tag_regex(pattern: str, label: str) -> re.Pattern[str]:
 class BindingsPackage:
     package_root: str
     toolkit_version: str
-    release_status: str
+    release_status: str | None
     tag_regex: str
 
     @property
@@ -147,7 +169,8 @@ def _text(value: Any, label: str, pattern: re.Pattern[str]) -> str:
     return value
 
 
-def _package_root(value: Any, label: str) -> str:
+def parse_package_root(value: Any, label: str = "package_root") -> str:
+    """Validate a repository-relative package root."""
     package_root = _text(value, label, _PACKAGE_ROOT_PATTERN)
     if any(part in (".", "..") for part in package_root.split("/")):
         raise BindingsConfigError(f"{label} must be a normalized repository-relative POSIX path: {package_root!r}")
@@ -169,7 +192,7 @@ def _read_tag_regex(repo_root: Path, package_root: str) -> str:
 
 
 def _package(package_root: str, raw: Any, repo_root: Path) -> BindingsPackage:
-    package_root = _package_root(package_root, "CUDA bindings package root")
+    package_root = parse_package_root(package_root, "CUDA bindings package root")
     data = _mapping(
         raw,
         f"CUDA bindings package root {package_root!r}",
@@ -189,31 +212,6 @@ def _package(package_root: str, raw: Any, repo_root: Path) -> BindingsPackage:
         ),
         tag_regex=_read_tag_regex(repo_root, package_root),
     )
-
-
-def package_from_dict(data: Mapping[str, object]) -> BindingsPackage:
-    """Validate a normalized package record passed between release jobs."""
-    package_root = _package_root(data.get("package_root"), "resolved package_root")
-    toolkit_version = _text(
-        data.get("toolkit_version"),
-        "resolved toolkit_version",
-        _TOOLKIT_VERSION_PATTERN,
-    )
-    release_status = _text(data.get("release_status"), "resolved release_status", _NAME_PATTERN)
-    if release_status not in RELEASE_STATUSES:
-        raise BindingsConfigError(
-            f"resolved release_status must be one of {', '.join(sorted(RELEASE_STATUSES))}: {release_status!r}"
-        )
-    tag_regex = data.get("tag_regex")
-    if not isinstance(tag_regex, str) or not tag_regex:
-        raise BindingsConfigError("resolved tag_regex must be a non-empty string")
-    _compile_tag_regex(tag_regex, "resolved tag_regex")
-    package = BindingsPackage(package_root, toolkit_version, release_status, tag_regex)
-    expected = package.to_dict()
-    for key in ("ctk_target", "cuda_major", "cuda_variant"):
-        if key in data and data[key] != expected[key]:
-            raise BindingsConfigError(f"resolved {key} is inconsistent with toolkit_version")
-    return package
 
 
 def _validate_release_statuses(packages: tuple[BindingsPackage, ...]) -> None:
@@ -262,18 +260,126 @@ def load_config(path: Path = DEFAULT_CONFIG, repo_root: Path = REPO_ROOT) -> Bin
     return validate_config(raw, repo_root)
 
 
+def _tag_tree_config(config_path: Path, release_source_root: Path) -> tuple[BindingsConfig | None, Any]:
+    """Load a schema-2 tag-tree registry and retain legacy metadata."""
+    try:
+        raw: Any = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None, None
+    except (OSError, yaml.YAMLError) as error:
+        raise BindingsConfigError(f"could not inspect tagged config {config_path}: {error}") from error
+
+    if not isinstance(raw, dict):
+        raise BindingsConfigError(f"tagged config {config_path} must contain a YAML mapping")
+    if "schema_version" not in raw:
+        return None, raw
+    try:
+        return validate_config(raw, release_source_root), raw
+    except BindingsConfigError as error:
+        raise BindingsConfigError(f"invalid schema-2 tagged config {config_path}: {error}") from error
+
+
+def _legacy_toolkit_version(raw: Any, release_version: Version, control_config_path: Path) -> str:
+    """Recover the CTK build pin used by a pre-registry release tree."""
+    try:
+        value = raw["cuda"]["build"]["version"]
+    except (KeyError, TypeError):
+        value = None
+    if value is not None:
+        return _text(value, "legacy cuda.build.version", _TOOLKIT_VERSION_PATTERN)
+
+    control = load_config(control_config_path, control_config_path.parent.parent)
+    target = release_version.release[:2]
+    if len(target) != 2:
+        raise BindingsConfigError(f"legacy release version has no CUDA minor: {release_version}")
+    matches = [
+        package.toolkit_version
+        for package in control.package_roots
+        if parse_pep440_version(package.toolkit_version).release[:2] == target
+    ]
+    if len(matches) != 1:
+        raise BindingsConfigError(
+            f"control registry must contain exactly one toolkit pin for legacy CUDA {target[0]}.{target[1]}; "
+            f"found {len(matches)}"
+        )
+    return matches[0]
+
+
+def _legacy_release_package(
+    release_tag: str,
+    release_source_root: Path,
+    control_config_path: Path,
+    raw: Any,
+) -> dict[str, object]:
+    """Resolve a release tree from before the schema-2 registry existed."""
+    package_root = "cuda_bindings"
+    if not (release_source_root / package_root).is_dir():
+        raise BindingsConfigError(f"legacy release package root is missing: {package_root}")
+
+    tag_regex = _read_tag_regex(release_source_root, package_root)
+
+    probe = BindingsPackage(package_root, "1.0.0", None, tag_regex)
+    release_version = probe.scm_version_from_tag(release_tag, fullmatch=False)
+    if release_version is None:
+        raise BindingsConfigError(f"legacy source SCM metadata does not match release tag: {release_tag!r}")
+    package = BindingsPackage(
+        package_root=package_root,
+        toolkit_version=_legacy_toolkit_version(raw, release_version, control_config_path),
+        release_status=None,
+        tag_regex=tag_regex,
+    )
+    return _release_record(package, release_version, "control")
+
+
+def _release_record(package: BindingsPackage, version: Version, origin: str) -> dict[str, object]:
+    """Return the package fields consumed by release jobs."""
+    return {
+        "package_root": package.package_root,
+        "toolkit_version": package.toolkit_version,
+        "release_version": str(version),
+        "release_registry_origin": origin,
+    }
+
+
+def resolve_release_bindings_package(
+    release_tag: str,
+    release_source_root: Path,
+    control_config_path: Path,
+) -> dict[str, object]:
+    """Resolve a release tag using its tag tree, with legacy-layout fallback."""
+    if not release_source_root.is_dir():
+        raise BindingsConfigError(f"release source root is not a directory: {release_source_root}")
+
+    tagged_config_path = release_source_root / "ci" / "versions.yml"
+    config, raw = _tag_tree_config(tagged_config_path, release_source_root)
+    config_source = f"tagged config {tagged_config_path}"
+    if config is None:
+        return _legacy_release_package(release_tag, release_source_root, control_config_path, raw)
+
+    package = config.match_tag(release_tag)
+    if package is None:
+        raise BindingsConfigError(
+            f"no CUDA bindings package root in {config_source} matches release tag: {release_tag!r}"
+        )
+
+    version = package.version_from_tag(release_tag)
+    assert version is not None
+    return _release_record(package, version, "tag")
+
+
 def write_github_env(data: Mapping[str, object], path: Path) -> None:
     """Append the bindings build environment consumed by documentation jobs."""
-    package = package_from_dict(data)
-    package_root = _package_root(
-        data.get("release_package_root", package.package_root),
-        "release package_root",
+    package_root = parse_package_root(data.get("package_root"), "resolved package_root")
+    toolkit_version = _text(
+        data.get("toolkit_version"),
+        "resolved toolkit_version",
+        _TOOLKIT_VERSION_PATTERN,
     )
     origin = data.get("release_registry_origin", "tag")
     if origin not in {"tag", "control"}:
         raise BindingsConfigError("release_registry_origin must be tag or control")
     with path.open("a", encoding="utf-8") as stream:
-        stream.write(f"BUILD_CTK_VER={package.toolkit_version}\n")
+        stream.write(f"BUILD_CTK_VER={toolkit_version}\n")
         stream.write(f"BINDINGS_PACKAGE_ROOT={package_root}\n")
         stream.write(f"BINDINGS_REGISTRY_ORIGIN={origin}\n")
 
@@ -290,6 +396,9 @@ def main(argv: list[str] | None = None) -> int:
         choices=sorted(RELEASE_STATUSES),
         help="print the package root with this release status",
     )
+    output.add_argument("--release-tag", help="resolve a release tag against its source tree")
+    parser.add_argument("--release-source-root", type=Path)
+    parser.add_argument("--control-config", type=Path)
     commands = parser.add_subparsers(dest="command")
     write_env = commands.add_parser(
         "write-github-env",
@@ -300,20 +409,37 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.command == "write-github-env":
-            if args.package_roots or args.release_status:
+            if (
+                args.package_roots
+                or args.release_status
+                or args.release_tag
+                or args.release_source_root is not None
+                or args.control_config is not None
+            ):
                 parser.error("write-github-env does not accept registry selectors")
             value = json.load(sys.stdin)
             if not isinstance(value, dict):
                 raise BindingsConfigError("stdin for write-github-env must contain a JSON object")
             write_github_env(value, args.github_env)
             return 0
-        config = load_config(args.config, args.repo_root)
-        if args.package_roots:
-            value = [package.to_dict() for package in config.package_roots]
-        elif args.release_status:
-            value = config.package_for_release_status(args.release_status).to_dict()
+        if args.release_tag:
+            if args.release_source_root is None or args.control_config is None:
+                parser.error("--release-tag requires --release-source-root and --control-config")
+            value: object = resolve_release_bindings_package(
+                args.release_tag,
+                args.release_source_root,
+                args.control_config,
+            )
         else:
-            value = config.to_dict()
+            if args.release_source_root is not None or args.control_config is not None:
+                parser.error("--release-source-root and --control-config require --release-tag")
+            config = load_config(args.config, args.repo_root)
+            if args.package_roots:
+                value = [package.to_dict() for package in config.package_roots]
+            elif args.release_status:
+                value = config.package_for_release_status(args.release_status).to_dict()
+            else:
+                value = config.to_dict()
         print(json.dumps(value, separators=(",", ":"), sort_keys=True))
         return 0
     except (BindingsConfigError, json.JSONDecodeError) as error:
