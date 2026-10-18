@@ -28,7 +28,7 @@ import pytest
 
 CORE = Path(__file__).resolve().parents[1] / "cuda" / "core"
 LOADER = (
-    Path(__file__).resolve().parents[2] / "cuda_bindings" / "cuda" / "bindings" / "_internal" / "driver_linux.pyx"
+    Path(__file__).resolve().parents[2] / "cuda_bindings_13" / "cuda" / "bindings" / "_internal" / "driver_linux.pyx"
 )
 
 
@@ -66,7 +66,7 @@ def _table_keys() -> list[str]:
     """The keys the fill looks up: "__" + the symbol that the cuda-bindings loader requests for
     each name in driver_api.hpp. For example, cuStreamDestroy maps to __cuStreamDestroy_v2."""
     if not LOADER.is_file():
-        pytest.skip("needs the cuda_bindings source tree next to cuda_core")
+        pytest.skip("needs the cuda_bindings_13 source tree next to cuda_core")
     names = re.findall(
         r"^\s*X\((cu\w+), \d+\)", (CORE / "_cpp" / "rt" / "driver_api.hpp").read_text(encoding="utf-8"), re.M
     )

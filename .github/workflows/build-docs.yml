@@ -111,8 +111,8 @@ jobs:
           REPO_DIR=$(pwd)
 
           # Release docs may check out tags from before the source-root rename.
-          if [[ -d cuda_bindings ]]; then
-            CUDA_BINDINGS_SOURCE_DIR=cuda_bindings
+          if [[ -d cuda_bindings_13 ]]; then
+            CUDA_BINDINGS_SOURCE_DIR=cuda_bindings_13
           elif [[ -d cuda_bindings ]]; then
             CUDA_BINDINGS_SOURCE_DIR=cuda_bindings
           else
