@@ -27,7 +27,9 @@ from pathlib import Path
 import pytest
 
 CORE = Path(__file__).resolve().parents[1] / "cuda" / "core"
-LOADER = Path(__file__).resolve().parents[2] / "cuda_bindings" / "cuda" / "bindings" / "_internal" / "driver_linux.pyx"
+LOADER = (
+    Path(__file__).resolve().parents[2] / "cuda_bindings" / "cuda" / "bindings" / "_internal" / "driver_linux.pyx"
+)
 
 
 def _gpu_available() -> bool:
