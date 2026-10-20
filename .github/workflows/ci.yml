@@ -122,7 +122,7 @@ jobs:
   #
   # Dependency graph (verified in pyproject.toml files):
   #   cuda_pathfinder   -> (no internal deps)
-  #   cuda_bindings     -> cuda_pathfinder
+  #   cuda_bindings  -> cuda_pathfinder
   #   cuda_core         -> cuda_pathfinder, cuda_bindings
   #   cuda_python       -> cuda_pathfinder, cuda_bindings, cuda_core (meta package)
   #
