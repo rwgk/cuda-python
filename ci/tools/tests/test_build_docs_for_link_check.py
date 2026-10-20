@@ -60,7 +60,7 @@ def test_checking_build_uses_local_output_and_source_ref(
     # Sphinx. Distribution names stay unchanged when a source directory moves.
     package_dirs = []
     for distribution, directory, module in (
-        ("cuda-bindings", "cuda_bindings", "bindings"),
+        ("cuda-bindings", "cuda_bindings_13", "bindings"),
         ("cuda-core", "cuda_core", "core"),
         ("cuda-pathfinder", "cuda_pathfinder", "pathfinder"),
         ("cuda-python", "cuda_python", None),

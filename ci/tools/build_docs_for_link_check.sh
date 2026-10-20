@@ -36,7 +36,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 for distribution, module_name, package_dir in (
-    ("cuda-bindings", "cuda.bindings", "cuda_bindings"),
+    ("cuda-bindings", "cuda.bindings", "cuda_bindings_13"),
     ("cuda-core", "cuda.core", "cuda_core"),
     ("cuda-pathfinder", "cuda.pathfinder", "cuda_pathfinder"),
 ):

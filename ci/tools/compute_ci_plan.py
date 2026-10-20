@@ -18,7 +18,7 @@ MODULES = ("pathfinder", "bindings", "core", "python")
 PLATFORMS = ("linux", "windows")
 PACKAGE_MODULES = {
     "cuda_pathfinder": "pathfinder",
-    "cuda_bindings": "bindings",
+    "cuda_bindings_13": "bindings",
     "cuda_core": "core",
     "cuda_python": "python",
 }
