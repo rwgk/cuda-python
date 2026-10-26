@@ -15,7 +15,9 @@ instructions and [maintenance guide](MAINTENANCE.md).
 - The shared toolchain and Cython cache helpers live in `_build_shared.py`,
   linked to the current bindings root. Keep each package-local helper a symlink
   or byte-for-byte copy.
-- Assess handwritten fixes and build changes for both supported roots.
-  Preserve intentional differences in generated APIs and packaging.
+- During implementation and review, follow
+  [Changes across bindings majors](../AGENTS.md#changes-across-bindings-majors).
+  Inspect the CUDA 13 counterpart and record matching changes or why they
+  are not applicable; preserve intentional differences.
 - Use the package's `test` dependency group for Python tests. Build Cython tests
   with `tests/cython/build_tests.sh` or `build_tests.bat` before running them.
